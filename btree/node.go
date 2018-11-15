@@ -2,31 +2,31 @@ package btree
 
 // Node for a B-tree
 type Node struct {
-	keys     []string
-	children []*Node
-	values   []string
-	numKeys  int
+	Keys     []string
+	Children []*Node
+	Values   []string
+	Next     *Node
 }
 
-func (node *Node) find(findKey string) (value string, ok bool) {
-	if node.children == nil {
-		return node.leafFind(findKey)
+func (node *Node) Find(findKey string) (value string, ok bool) {
+	if node.Children == nil {
+		return node.LeafFind(findKey)
 	}
-	return node.intermediateFind(findKey)
+	return node.IntermediateFind(findKey)
 }
 
-func (node *Node) intermediateFind(findKey string) (value string, ok bool) {
+func (node *Node) IntermediateFind(findKey string) (value string, ok bool) {
 	index := 0
-	for index < len(node.keys) && findKey < node.keys[index] {
+	for index < len(node.Keys) && findKey >= node.Keys[index] {
 		index++
 	}
-	return node.children[index].find(findKey)
+	return node.Children[index].Find(findKey)
 }
 
-func (node *Node) leafFind(findKey string) (value string, ok bool) {
-	for i, key := range node.keys {
+func (node *Node) LeafFind(findKey string) (value string, ok bool) {
+	for i, key := range node.Keys {
 		if findKey == key {
-			return node.values[i], true
+			return node.Values[i], true
 		}
 	}
 	return "", false
