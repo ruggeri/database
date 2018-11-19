@@ -1,16 +1,22 @@
 package btree
 
+import (
+	"sync"
+)
+
 type LeafNode struct {
 	Keys    []string
 	Values  []string
 	Next    *LeafNode
 	MaxKeys int
+	Mux     sync.RWMutex
 }
 
 type IntermediateNode struct {
 	Keys     []string
 	Children []Node
 	MaxKeys  int
+	Mux      sync.RWMutex
 }
 
 type InsertionResult struct {
@@ -27,11 +33,15 @@ type Node interface {
 }
 
 func (node *IntermediateNode) Find(findKey string) (value string, ok bool) {
+	node.Mux.RLock()
+	defer node.Mux.RUnlock()
 	idx := node.indexContaining(findKey)
 	return node.Children[idx].Find(findKey)
 }
 
 func (node *LeafNode) Find(findKey string) (value string, ok bool) {
+	node.Mux.RLock()
+	defer node.Mux.RUnlock()
 	for idx, key := range node.Keys {
 		if findKey == key {
 			return node.Values[idx], true
@@ -41,6 +51,8 @@ func (node *LeafNode) Find(findKey string) (value string, ok bool) {
 }
 
 func (node *IntermediateNode) Upsert(updateKey, value string) InsertionResult {
+	node.Mux.Lock()
+	defer node.Mux.Unlock()
 	idx := node.indexContaining(updateKey)
 	result := node.Children[idx].Upsert(updateKey, value)
 	if result.Left == nil {
@@ -57,6 +69,8 @@ func (node *IntermediateNode) Upsert(updateKey, value string) InsertionResult {
 }
 
 func (node *LeafNode) Upsert(updateKey, value string) InsertionResult {
+	node.Mux.Lock()
+	defer node.Mux.Unlock()
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++
@@ -83,31 +97,42 @@ func (node *IntermediateNode) indexContaining(findKey string) int {
 }
 
 func (node *LeafNode) Split() (Node, Node, string) {
+	rightKeys := make([]string, len(node.Keys)/2)
+	copy(rightKeys, node.Keys[len(node.Keys)/2:])
+	rightValues := make([]string, len(node.Values)/2)
+	copy(rightValues, node.Values[len(node.Values)/2:])
 	right := LeafNode{
-		Keys:    node.Keys[len(node.Keys)/2:],
-		Values:  node.Values[len(node.Values)/2:],
+		Keys:    rightKeys,
+		Values:  rightValues,
 		Next:    node.Next,
 		MaxKeys: node.MaxKeys,
+		Mux:     sync.RWMutex{},
 	}
 	left := LeafNode{
 		Keys:    node.Keys[:len(node.Keys)/2],
 		Values:  node.Values[:len(node.Values)/2],
 		Next:    &right,
 		MaxKeys: node.MaxKeys,
+		Mux:     sync.RWMutex{},
 	}
 	return &left, &right, right.Keys[0]
 }
 
 func (node *IntermediateNode) Split() (Node, Node, string) {
-	splitKey := node.Keys[len(node.Keys)/2]
+	medianIndex := len(node.Keys) / 2
+	splitKey := node.Keys[medianIndex]
+	rightKeys := make([]string, len(node.Keys)-medianIndex-1)
+	copy(rightKeys, node.Keys[medianIndex+1:])
+	rightChildren := make([]Node, len(node.Children)-medianIndex-1)
+	copy(rightChildren, node.Children[medianIndex+1:])
 	right := IntermediateNode{
-		Keys:     node.Keys[len(node.Keys)/2+1:],
-		Children: node.Children[(len(node.Children)+1)/2:],
+		Keys:     rightKeys,
+		Children: rightChildren,
 		MaxKeys:  node.MaxKeys,
 	}
 	left := IntermediateNode{
-		Keys:     node.Keys[:len(node.Keys)/2],
-		Children: node.Children[:(len(node.Children)+1)/2],
+		Keys:     node.Keys[:medianIndex],
+		Children: node.Children[:medianIndex+1],
 		MaxKeys:  node.MaxKeys,
 	}
 	return &left, &right, splitKey
