@@ -25,8 +25,10 @@ func (tree *BTree) Find(key string) (value string, ok bool) {
 
 func (tree *BTree) Upsert(key, value string) (created bool) {
 	tree.mux.Lock()
-	defer tree.mux.Unlock()
-	result := tree.Root.Upsert(key, value)
+	lockContext := LockContext{}
+	lockContext.Add(&tree.mux)
+	defer lockContext.UnlockAll()
+	result := tree.Root.Upsert(key, value, &lockContext)
 	if result.Left != nil {
 		tree.Root = &IntermediateNode{
 			Keys:     []string{result.SplitKey},

@@ -28,8 +28,23 @@ type InsertionResult struct {
 
 type Node interface {
 	Find(findKey string) (string, bool)
-	Upsert(updateKey, value string) InsertionResult
+	Upsert(updateKey, value string, LockContext *LockContext) InsertionResult
 	Split() (Node, Node, string)
+}
+
+type LockContext struct {
+	Muxes []*sync.RWMutex
+}
+
+func (ctx *LockContext) UnlockAll() {
+	for _, mux := range ctx.Muxes {
+		mux.Unlock()
+	}
+	ctx.Muxes = ctx.Muxes[:0]
+}
+
+func (ctx *LockContext) Add(mux *sync.RWMutex) {
+	ctx.Muxes = append(ctx.Muxes, mux)
 }
 
 func (node *IntermediateNode) Find(findKey string) (value string, ok bool) {
@@ -50,11 +65,16 @@ func (node *LeafNode) Find(findKey string) (value string, ok bool) {
 	return "", false
 }
 
-func (node *IntermediateNode) Upsert(updateKey, value string) InsertionResult {
+func (node *IntermediateNode) Upsert(updateKey, value string, lockContext *LockContext) InsertionResult {
 	node.Mux.Lock()
-	defer node.Mux.Unlock()
+	if len(node.Keys) < node.MaxKeys {
+		lockContext.UnlockAll()
+	}
+	lockContext.Add(&node.Mux)
+	defer lockContext.UnlockAll()
+
 	idx := node.indexContaining(updateKey)
-	result := node.Children[idx].Upsert(updateKey, value)
+	result := node.Children[idx].Upsert(updateKey, value, lockContext)
 	if result.Left == nil {
 		return result
 	}
@@ -68,9 +88,13 @@ func (node *IntermediateNode) Upsert(updateKey, value string) InsertionResult {
 	return InsertionResult{Created: result.Created}
 }
 
-func (node *LeafNode) Upsert(updateKey, value string) InsertionResult {
+func (node *LeafNode) Upsert(updateKey, value string, LockContext *LockContext) InsertionResult {
 	node.Mux.Lock()
-	defer node.Mux.Unlock()
+	if len(node.Keys) < node.MaxKeys {
+		LockContext.UnlockAll()
+	}
+	LockContext.Add(&node.Mux)
+	defer LockContext.UnlockAll()
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++
@@ -106,14 +130,12 @@ func (node *LeafNode) Split() (Node, Node, string) {
 		Values:  rightValues,
 		Next:    node.Next,
 		MaxKeys: node.MaxKeys,
-		Mux:     sync.RWMutex{},
 	}
 	left := LeafNode{
 		Keys:    node.Keys[:len(node.Keys)/2],
 		Values:  node.Values[:len(node.Values)/2],
 		Next:    &right,
 		MaxKeys: node.MaxKeys,
-		Mux:     sync.RWMutex{},
 	}
 	return &left, &right, right.Keys[0]
 }
