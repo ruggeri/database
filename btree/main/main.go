@@ -55,12 +55,13 @@ func main() {
 		}
 		wg.Done()
 	}
-
+	start := time.Now()
 	for _, queue := range queues {
 		wg.Add(1)
 		go addEntries(queue)
 	}
 	wg.Wait()
+	end := time.Now()
 	count := 0
 	for _, entry := range entries {
 		value, _ := tree.Find(entry[0])
@@ -71,4 +72,5 @@ func main() {
 		}
 	}
 	fmt.Println(count)
+	fmt.Println(end.Sub(start))
 }

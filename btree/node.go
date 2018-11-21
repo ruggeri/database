@@ -69,9 +69,9 @@ func (node *IntermediateNode) Upsert(updateKey, value string, lockContext *LockC
 	node.Mux.Lock()
 	if len(node.Keys) < node.MaxKeys {
 		lockContext.UnlockAll()
+		defer lockContext.UnlockAll()
 	}
 	lockContext.Add(&node.Mux)
-	defer lockContext.UnlockAll()
 
 	idx := node.indexContaining(updateKey)
 	result := node.Children[idx].Upsert(updateKey, value, lockContext)
@@ -92,9 +92,9 @@ func (node *LeafNode) Upsert(updateKey, value string, LockContext *LockContext) 
 	node.Mux.Lock()
 	if len(node.Keys) < node.MaxKeys {
 		LockContext.UnlockAll()
+		defer LockContext.UnlockAll()
 	}
 	LockContext.Add(&node.Mux)
-	defer LockContext.UnlockAll()
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++
