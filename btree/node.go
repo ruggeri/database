@@ -121,9 +121,9 @@ func (node *IntermediateNode) indexContaining(findKey string) int {
 }
 
 func (node *LeafNode) Split() (Node, Node, string) {
-	rightKeys := make([]string, len(node.Keys)/2)
+	rightKeys := make([]string, len(node.Keys)-len(node.Keys)/2)
 	copy(rightKeys, node.Keys[len(node.Keys)/2:])
-	rightValues := make([]string, len(node.Values)/2)
+	rightValues := make([]string, len(node.Values)-len(node.Values)/2)
 	copy(rightValues, node.Values[len(node.Values)/2:])
 	right := LeafNode{
 		Keys:    rightKeys,
