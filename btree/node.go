@@ -47,6 +47,13 @@ func (ctx *LockContext) Add(mux *sync.RWMutex) {
 	ctx.Muxes = append(ctx.Muxes, mux)
 }
 
+func (ctx *LockContext) UnlockOne() {
+	if len(ctx.Muxes) > 0 {
+		ctx.Muxes[len(ctx.Muxes)-1].Unlock()
+		ctx.Muxes = ctx.Muxes[:len(ctx.Muxes)-1]
+	}
+}
+
 func (node *IntermediateNode) Find(findKey string) (value string, ok bool) {
 	node.Mux.RLock()
 	defer node.Mux.RUnlock()
@@ -69,9 +76,9 @@ func (node *IntermediateNode) Upsert(updateKey, value string, lockContext *LockC
 	node.Mux.Lock()
 	if len(node.Keys) < node.MaxKeys {
 		lockContext.UnlockAll()
-		defer lockContext.UnlockAll()
 	}
 	lockContext.Add(&node.Mux)
+	defer lockContext.UnlockOne()
 
 	idx := node.indexContaining(updateKey)
 	result := node.Children[idx].Upsert(updateKey, value, lockContext)
@@ -88,13 +95,13 @@ func (node *IntermediateNode) Upsert(updateKey, value string, lockContext *LockC
 	return InsertionResult{Created: result.Created}
 }
 
-func (node *LeafNode) Upsert(updateKey, value string, LockContext *LockContext) InsertionResult {
+func (node *LeafNode) Upsert(updateKey, value string, lockContext *LockContext) InsertionResult {
 	node.Mux.Lock()
 	if len(node.Keys) < node.MaxKeys {
-		LockContext.UnlockAll()
-		defer LockContext.UnlockAll()
+		lockContext.UnlockAll()
 	}
-	LockContext.Add(&node.Mux)
+	lockContext.Add(&node.Mux)
+	defer lockContext.UnlockOne()
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++

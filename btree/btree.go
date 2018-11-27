@@ -27,7 +27,7 @@ func (tree *BTree) Upsert(key, value string) (created bool) {
 	tree.mux.Lock()
 	lockContext := LockContext{}
 	lockContext.Add(&tree.mux)
-	defer lockContext.UnlockAll()
+	defer lockContext.UnlockOne()
 	result := tree.Root.Upsert(key, value, &lockContext)
 	if result.Left != nil {
 		tree.Root = &IntermediateNode{
