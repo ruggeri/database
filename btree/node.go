@@ -47,10 +47,13 @@ func (ctx *LockContext) Add(mux *sync.RWMutex) {
 	ctx.Muxes = append(ctx.Muxes, mux)
 }
 
-func (ctx *LockContext) UnlockOne() {
-	if len(ctx.Muxes) > 0 {
-		ctx.Muxes[len(ctx.Muxes)-1].Unlock()
-		ctx.Muxes = ctx.Muxes[:len(ctx.Muxes)-1]
+func (ctx *LockContext) UnlockOne(mux *sync.RWMutex) {
+	for idx, ownMux := range ctx.Muxes {
+		if mux == ownMux {
+			mux.Unlock()
+			ctx.Muxes = append(ctx.Muxes[:idx], ctx.Muxes[idx+1:]...)
+			return
+		}
 	}
 }
 
@@ -78,7 +81,7 @@ func (node *IntermediateNode) Upsert(updateKey, value string, lockContext *LockC
 		lockContext.UnlockAll()
 	}
 	lockContext.Add(&node.Mux)
-	defer lockContext.UnlockOne()
+	defer lockContext.UnlockOne(&node.Mux)
 
 	idx := node.indexContaining(updateKey)
 	result := node.Children[idx].Upsert(updateKey, value, lockContext)
@@ -101,7 +104,7 @@ func (node *LeafNode) Upsert(updateKey, value string, lockContext *LockContext) 
 		lockContext.UnlockAll()
 	}
 	lockContext.Add(&node.Mux)
-	defer lockContext.UnlockOne()
+	defer lockContext.UnlockOne(&node.Mux)
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++
