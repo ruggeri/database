@@ -46,6 +46,9 @@ type LockContext struct {
 	StableAncestor SafeUpserter
 }
 
+// NED: I don't love this method. In my opinion, it breaks the
+// LockContext's invariant that the deepest StableAncestor (so far)
+// should always have its Mux at position ctx.Muxes[1].
 func (ctx *LockContext) UpdateStableAncestor(ancestor SafeUpserter) {
 	for _, mux := range ctx.Muxes[:len(ctx.Muxes)-1] {
 		mux.RUnlock()
@@ -57,6 +60,7 @@ func (ctx *LockContext) UpdateStableAncestor(ancestor SafeUpserter) {
 
 func (ctx *LockContext) Add(node SafeUpserter) {
 	node.GetMux().RLock()
+	// NED: Why not just add the mux into the slice first?
 	if node.IsStable() {
 		ctx.UpdateStableAncestor(node)
 	}
@@ -122,6 +126,8 @@ func (node *IntermediateNode) SafeUpsert(updateKey, value string) InsertionResul
 	child.GetMux().Lock()
 	defer child.GetMux().Unlock()
 	result := child.SafeUpsert(updateKey, value)
+	// NED: I know you're testing for no split happened, but this obscures
+	// that. Maybe best would be to have a method for SplitOccurred?
 	if result.Left == nil {
 		return result
 	}
@@ -135,6 +141,9 @@ func (node *IntermediateNode) SafeUpsert(updateKey, value string) InsertionResul
 	return InsertionResult{Created: result.Created}
 }
 
+// NED: It will help someone new to understand if you express the
+// precondition for calling this method: you're supposed to already have
+// write locks up to the stable ancestor.
 func (node *LeafNode) SafeUpsert(updateKey, value string) InsertionResult {
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
@@ -162,6 +171,8 @@ func (node *IntermediateNode) indexContaining(findKey string) int {
 }
 
 func (node *LeafNode) Split() (Node, Node, string) {
+	// NED: could allocate more space here? Any one insert is going to
+	// trigger a resize of the new right node.
 	rightKeys := make([]string, len(node.Keys)-len(node.Keys)/2)
 	copy(rightKeys, node.Keys[len(node.Keys)/2:])
 	rightValues := make([]string, len(node.Values)-len(node.Values)/2)
@@ -172,6 +183,8 @@ func (node *LeafNode) Split() (Node, Node, string) {
 		Next:    node.Next,
 		MaxKeys: node.MaxKeys,
 	}
+	// NED: I like how you chose to copy the right, while reusing the
+	// left's slice. That's efficient.
 	left := LeafNode{
 		Keys:    node.Keys[:len(node.Keys)/2],
 		Values:  node.Values[:len(node.Values)/2],
