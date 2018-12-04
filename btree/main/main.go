@@ -27,9 +27,9 @@ func main() {
 	fmt.Println(tree.Find(""))
 	fmt.Println(tree.Find("k"))
 
-	tree = btree.NewBTree(10)
+	tree = btree.NewBTree(12)
 	const numEntries = int(1e6)
-	const numQueues = 10
+	const numQueues = 12
 	const queueSize = numEntries / numQueues
 	var entries [][2]string
 	var wg sync.WaitGroup

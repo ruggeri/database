@@ -28,46 +28,46 @@ type InsertionResult struct {
 
 type Node interface {
 	Find(findKey string, parentMux *sync.RWMutex) (string, bool)
-	LockedUpsert(updateKey, value string) InsertionResult
+	SafeUpsert(updateKey, value string) InsertionResult
 	Split() (Node, Node, string)
 	GetMux() *sync.RWMutex
 	AcquireLockContext(updateKey string, lockContext *LockContext)
-	CheckAncestor(updateKey string, ancestor LockedUpserter, parentMux *sync.RWMutex) bool
+	IsStable() bool
 }
 
-type LockedUpserter interface {
-	LockedUpsert(updateKey, value string) InsertionResult
+type SafeUpserter interface {
+	SafeUpsert(updateKey, value string) InsertionResult
 	GetMux() *sync.RWMutex
+	IsStable() bool
 }
 
 type LockContext struct {
 	Muxes          []*sync.RWMutex
-	StableAncestor LockedUpserter
+	StableAncestor SafeUpserter
 }
 
-func (ctx *LockContext) UnlockAll() {
-	for _, mux := range ctx.Muxes {
+func (ctx *LockContext) UpdateStableAncestor(ancestor SafeUpserter) {
+	for _, mux := range ctx.Muxes[:len(ctx.Muxes)-1] {
 		mux.RUnlock()
 	}
-	ctx.Muxes = ctx.Muxes[:0]
+	ctx.Muxes = ctx.Muxes[len(ctx.Muxes)-1:]
 
-	ctx.StableAncestor = nil
+	ctx.StableAncestor = ancestor
 }
 
-func (ctx *LockContext) Add(node LockedUpserter) {
+func (ctx *LockContext) Add(node SafeUpserter) {
+	node.GetMux().RLock()
+	if node.IsStable() {
+		ctx.UpdateStableAncestor(node)
+	}
 	ctx.Muxes = append(ctx.Muxes, node.GetMux())
-
-	if ctx.StableAncestor == nil {
-		ctx.StableAncestor = node
-	}
 }
 
-func (ctx *LockContext) Upgrade() LockedUpserter {
-	for _, mux := range ctx.Muxes {
+func (ctx *LockContext) Resolve() (SafeUpserter, *sync.RWMutex) {
+	for _, mux := range ctx.Muxes[1:] {
 		mux.RUnlock()
 	}
-	ctx.StableAncestor.GetMux().Lock()
-	return ctx.StableAncestor
+	return ctx.StableAncestor, ctx.Muxes[0]
 }
 
 func (node *IntermediateNode) GetMux() *sync.RWMutex {
@@ -97,29 +97,15 @@ func (node *LeafNode) Find(findKey string, parentMux *sync.RWMutex) (value strin
 	return "", false
 }
 
-func (node *IntermediateNode) CheckAncestor(updateKey string, ancestor LockedUpserter, parentMux *sync.RWMutex) bool {
-	if node == ancestor {
-		parentMux.RUnlock()
-		return true
-	}
-
-	node.Mux.RLock()
-	parentMux.RUnlock()
-
-	idx := node.indexContaining(updateKey)
-	return node.Children[idx].CheckAncestor(updateKey, ancestor, &node.Mux)
+func (node *IntermediateNode) IsStable() bool {
+	return len(node.Keys) < node.MaxKeys
 }
 
-func (node *LeafNode) CheckAncestor(updateKey string, ancestor LockedUpserter, parentMux *sync.RWMutex) bool {
-	parentMux.RUnlock()
-	return node == ancestor
+func (node *LeafNode) IsStable() bool {
+	return len(node.Keys) < node.MaxKeys
 }
 
 func (node *IntermediateNode) AcquireLockContext(updateKey string, lockContext *LockContext) {
-	node.Mux.RLock()
-	if len(node.Keys) < node.MaxKeys {
-		lockContext.UnlockAll()
-	}
 	lockContext.Add(node)
 
 	idx := node.indexContaining(updateKey)
@@ -127,19 +113,15 @@ func (node *IntermediateNode) AcquireLockContext(updateKey string, lockContext *
 }
 
 func (node *LeafNode) AcquireLockContext(updateKey string, lockContext *LockContext) {
-	node.Mux.RLock()
-	if len(node.Keys) < node.MaxKeys {
-		lockContext.UnlockAll()
-	}
 	lockContext.Add(node)
 }
 
-func (node *IntermediateNode) LockedUpsert(updateKey, value string) InsertionResult {
+func (node *IntermediateNode) SafeUpsert(updateKey, value string) InsertionResult {
 	idx := node.indexContaining(updateKey)
 	child := node.Children[idx]
 	child.GetMux().Lock()
 	defer child.GetMux().Unlock()
-	result := child.LockedUpsert(updateKey, value)
+	result := child.SafeUpsert(updateKey, value)
 	if result.Left == nil {
 		return result
 	}
@@ -153,7 +135,7 @@ func (node *IntermediateNode) LockedUpsert(updateKey, value string) InsertionRes
 	return InsertionResult{Created: result.Created}
 }
 
-func (node *LeafNode) LockedUpsert(updateKey, value string) InsertionResult {
+func (node *LeafNode) SafeUpsert(updateKey, value string) InsertionResult {
 	idx := 0
 	for idx < len(node.Keys) && updateKey > node.Keys[idx] {
 		idx++
